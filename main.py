@@ -588,7 +588,7 @@ async def pwwp_callback(bot, callback_query):
     await callback_query.answer()
     
     if user_id not in auth_users:
-        await bot.send_message(callback_query.message.chat.id, "**You Are Not Subscribed To This Bot DM for access @A_S_9162**")
+        await bot.send_message(callback_query.message.chat.id, "**You Are Not Subscribed To This Bot DM for access @SmartBoy_ApnaMS**")
         return
         
     # FIXED: Properly wrap async function for ThreadPool
