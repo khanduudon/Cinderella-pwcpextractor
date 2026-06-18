@@ -2016,11 +2016,19 @@ async def process_pwwp(bot, m, user_id):
                 clean_batch_name = selected_batch_name.replace("/", "-").replace("|", "-")
                 clean_file_name = f"{user_id}_{clean_batch_name}"
 
-                await editable.edit(
-                    f"**✅ Hardcoded Batch Found!\n\n"
-                    f"Batch: ```\n{selected_batch_name}```\n\n"
-                    f"Extracting using pre-configured batch data...**"
+            try:
+                new_text = (
+                f"**✅ Hardcoded Batch Found!**\n\n"
+                f"Batch: ```\n{selected_batch_name}\n```\n\n"
+                f"**Extracting using pre-configured batch data...**"
                 )
+
+            if editable.text != new_text:
+            await editable.edit(new_text)
+
+            except Exception as e:
+            if "MESSAGE_NOT_MODIFIED" not in str(e):
+            raise e
 
             else:
                 # Existing flow: Fetch ALL batches from multiple sources
