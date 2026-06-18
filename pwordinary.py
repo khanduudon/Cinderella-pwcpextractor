@@ -70,6 +70,48 @@ print(4321)
 
 
 # ===============================================================
+# HARDCODED BATCH DATABASE - For without-purchase batch access
+# Each batch has: batchId (PW internal), name, _id (v2 API ID)
+# ===============================================================
+HARDCODED_PW_BATCHES = [
+    {
+        "batchId": "698adaafee5f29171102c9ca",
+        "name": "Yakeen NEET Hindi 2027",
+        "_id": "6a337b965244447b88218145"
+    },
+    {
+        "batchId": "69897f0ad7c19b7b2f7cc35f",
+        "name": "Arjuna NEET 2027",
+        "_id": "6a337c219435907aebad6216"
+    },
+    {
+        "batchId": "6779346f920e596fe7f0e247",
+        "name": "Lakshya NEET 2027",
+        "_id": "6a337c223f74dfe4baaf5cfb"
+    }
+]
+
+
+def find_hardcoded_batch(batch_search: str) -> dict:
+    """
+    Find a hardcoded batch by name (case-insensitive).
+    Returns the batch dict if found, None otherwise.
+    Matches partial names too - e.g., 'yakeen' matches 'Yakeen NEET Hindi 2027'
+    """
+    if not batch_search:
+        return None
+    search_lower = batch_search.strip().lower()
+    for batch in HARDCODED_PW_BATCHES:
+        if search_lower == batch["name"].lower():
+            return batch
+    # Also try partial match
+    for batch in HARDCODED_PW_BATCHES:
+        if search_lower in batch["name"].lower():
+            return batch
+    return None
+
+
+# ===============================================================
 # GLOBAL STATE: Pagination tracking for batch selection
 # ===============================================================
 # Stores batch list and current page per user
@@ -117,7 +159,7 @@ def safe_str(value: Any, default: str = "") -> str:
         return value
     if isinstance(value, dict):
         # Try to extract a meaningful string from dict
-        for key in ["topic", "name", "title", "subject", "text", "value", "label", "display"]:
+        for key in ["topic", "name", "title", "subject", "text", "value", "label", "display", "en", "hi"]:
             if key in value and value[key] is not None:
                 return safe_str(value[key], default)
         # If no known key, return the first string value found
@@ -283,7 +325,7 @@ def format_video_line(topic, video_info, parent_id="", child_id="", video_id="")
         if video_info.get("drm_type") and video_info.get("key_id"):
             line += f" | DRM:{video_info['drm_type']} | KID:{video_info['key_id']}"
         if video_info.get("drm_keys"):
-            line += f" | Keys:{ '|'.join(str(k) for k in video_info['drm_keys'])}"
+            line += f" | Keys:{'|'.join(str(k) for k in video_info['drm_keys'])}"
         if video_info.get("video_id"):
             line += f" | VideoID:{video_info['video_id']}"
         lines.append(line)
@@ -1315,9 +1357,81 @@ async def fetch_schedule_via_contents(session, batch_id, start_epoch, end_epoch,
 
 
 # ===============================================================
+# CRITICAL FIX: Enhanced topic extraction from schedule items
+# Handles all PW API response formats for topic/subject names
+# ===============================================================
+def extract_topic_from_schedule_item(schedule_item: dict) -> str:
+    """
+    Enhanced topic extraction from a schedule item.
+    Tries multiple fields to find the best topic name.
+    """
+    if not schedule_item:
+        return "Unknown Topic"
+
+    # Try direct topic fields
+    for key in ["topic", "name", "title", "displayName", "classTitle", "lessonName"]:
+        val = schedule_item.get(key)
+        if val:
+            topic = safe_topic(val)
+            if topic and topic != "Unknown Topic":
+                return topic
+
+    # Try nested topic in dict
+    topic_dict = schedule_item.get("topic", {})
+    if isinstance(topic_dict, dict):
+        for key in ["en", "hi", "name", "title", "text"]:
+            if key in topic_dict and topic_dict[key]:
+                topic = safe_topic(topic_dict[key])
+                if topic and topic != "Unknown Topic":
+                    return topic
+
+    # Try subject info for topic
+    subject_info = schedule_item.get("subject", {})
+    if isinstance(subject_info, dict):
+        for key in ["subject", "name", "title"]:
+            if key in subject_info and subject_info[key]:
+                topic = safe_topic(subject_info[key])
+                if topic and topic != "Unknown Topic":
+                    return topic
+
+    return "Unknown Topic"
+
+
+# ===============================================================
+# CRITICAL FIX: Enhanced subject_id extraction from schedule items
+# Prevents dict-string in URLs causing 404 errors
+# ===============================================================
+def extract_subject_id_from_schedule_item(schedule_item: dict) -> str:
+    """
+    Safely extract subject_id from a schedule item.
+    Handles all PW API response formats.
+    """
+    if not schedule_item:
+        return ""
+
+    # Try direct fields first
+    for key in ["batchSubjectId", "subjectId", "batchSubject", "subject"]:
+        val = schedule_item.get(key)
+        if val:
+            if isinstance(val, str):
+                return val
+            elif isinstance(val, dict):
+                return val.get("_id", val.get("id", ""))
+            elif isinstance(val, list) and val:
+                first = val[0]
+                if isinstance(first, dict):
+                    return first.get("_id", first.get("id", ""))
+                elif isinstance(first, str):
+                    return first
+
+    return ""
+
+
+# ===============================================================
 # ENHANCED: Process content for a specific date using user timestamp
 # Uses both schedule endpoint + content-based fallback
 # Now properly uses IST and user's timestamp as endDate
+# CRITICAL FIX: Better topic extraction and content fallbacks
 # ===============================================================
 async def process_date_content(session, batch_id, batch_name, start_epoch, end_epoch, target_date, headers, user_id):
     """
@@ -1363,27 +1477,27 @@ async def process_date_content(session, batch_id, batch_name, start_epoch, end_e
     clean_batch_name = batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')
 
     for schedule_item in schedules:
-        # Extract subject_id
-        raw_subject = schedule_item.get("subject", "")
-        subject_id = ""
-        if isinstance(raw_subject, list) and raw_subject:
-            first = raw_subject[0]
-            subject_id = first.get("_id", "") if isinstance(first, dict) else str(first)
-        elif isinstance(raw_subject, dict):
-            subject_id = raw_subject.get("_id", "")
-        else:
-            subject_id = str(raw_subject) if raw_subject else ""
+        # CRITICAL FIX: Use enhanced subject_id extraction
+        subject_id = extract_subject_id_from_schedule_item(schedule_item)
+
+        # Fallback: try old method if enhanced returns empty
+        if not subject_id:
+            raw_subject = schedule_item.get("subject", "")
+            if isinstance(raw_subject, list) and raw_subject:
+                first = raw_subject[0]
+                subject_id = first.get("_id", "") if isinstance(first, dict) else str(first)
+            elif isinstance(raw_subject, dict):
+                subject_id = raw_subject.get("_id", "")
+            else:
+                subject_id = str(raw_subject) if raw_subject else ""
 
         if not subject_id:
             subject_id = schedule_item.get("subjectId", "") or schedule_item.get("batchSubjectId", "")
 
         schedule_id = schedule_item.get("_id", "")
 
-        # CRITICAL FIX: Use safe_topic to handle dict/None topic properly
-        topic = safe_topic(
-            schedule_item.get("topic") or schedule_item.get("name"),
-            "Unknown Topic"
-        )
+        # CRITICAL FIX: Use enhanced topic extraction
+        topic = extract_topic_from_schedule_item(schedule_item)
 
         start_time = schedule_item.get("startTime", schedule_item.get("startDate", ""))
         end_time_val = schedule_item.get("endTime", schedule_item.get("endDate", ""))
@@ -1391,6 +1505,7 @@ async def process_date_content(session, batch_id, batch_name, start_epoch, end_e
         # CRITICAL FIX: Use safe_topic for subject_name too
         subject_name = subject_map.get(str(subject_id), "")
         if not subject_name:
+            raw_subject = schedule_item.get("subject", "")
             if isinstance(raw_subject, dict):
                 subject_name = safe_topic(raw_subject.get("subject") or raw_subject.get("name"), "")
             if not subject_name:
@@ -1403,7 +1518,9 @@ async def process_date_content(session, batch_id, batch_name, start_epoch, end_e
         video_lines = []
         notes_lines = []
 
-        if subject_id and schedule_id:
+        # CRITICAL FIX: Only call schedule-details if we have valid string IDs
+        # This prevents 404 from dict-string in URL
+        if subject_id and schedule_id and isinstance(subject_id, str) and isinstance(schedule_id, str):
             try:
                 detail_url = f"https://api.penpencil.co/v3/batches/{batch_id}/subject/{subject_id}/schedule/{schedule_id}/schedule-details"
                 detail_data = await fetch_pwwp_data(session, detail_url, headers=headers)
@@ -1476,6 +1593,20 @@ async def process_date_content(session, batch_id, batch_name, start_epoch, end_e
                 vid_fb = schedule_item.get('videoId', '') or schedule_item.get('contentId', '')
                 vurl = append_video_params(vurl, parent_id_fb, child_id_fb, vid_fb)
                 video_lines.append(f"{topic}:{vurl}{drm}")
+
+        # CRITICAL FIX: Also try extracting from videoDetails at schedule item level
+        if not video_lines:
+            vd = schedule_item.get('videoDetails', {})
+            if vd:
+                parent_id_vd, child_id_vd, vid_vd = extract_pw_ids(
+                    video_details=vd,
+                    schedule_data=schedule_item,
+                    schedule_id=schedule_id,
+                    batch_id=batch_id
+                )
+                vurl, drm = extract_comprehensive_video_url(vd, parent_id_vd, child_id_vd, vid_vd)
+                if vurl:
+                    video_lines.append(f"{topic}:{vurl}{drm}")
 
         # Apply deduplication to videos too
         for vline in video_lines:
@@ -1850,10 +1981,32 @@ async def process_pwwp(bot, m, user_id):
                 await editable.edit("**Timeout! You took too long to respond😢.**")
                 return
 
-            # Fetch ALL batches from multiple sources
-            all_batches = await fetch_all_pw_batches(session, headers, batch_search)
+            # ==========================================================
+            # CRITICAL FIX: Check hardcoded batches FIRST (case-insensitive)
+            # This allows without-purchase batch content extraction
+            # ==========================================================
+            hardcoded_batch = find_hardcoded_batch(batch_search)
 
-            if all_batches:
+            if hardcoded_batch:
+                # Use hardcoded batch data directly - skip API batch search
+                selected_batch_id = hardcoded_batch["_id"]  # Use _id for v2 API calls
+                selected_batch_name = hardcoded_batch["name"]
+                clean_batch_name = selected_batch_name.replace("/", "-").replace("|", "-")
+                clean_file_name = f"{user_id}_{clean_batch_name}"
+
+                await editable.edit(
+                    f"**✅ Hardcoded Batch Found!\n\n"
+                    f"Batch: ```\n{selected_batch_name}```\n\n"
+                    f"Extracting using pre-configured batch data...**"
+                )
+
+            else:
+                # Existing flow: Fetch ALL batches from multiple sources
+                all_batches = await fetch_all_pw_batches(session, headers, batch_search)
+
+                if not all_batches:
+                    raise Exception("No batches found for the given search name.")
+
                 # ==========================================================
                 # CRITICAL FIX: Pagination system for batch selection
                 # Store batches, show 10 per page with Next/Prev buttons
@@ -1937,213 +2090,211 @@ async def process_pwwp(bot, m, user_id):
                 else:
                     raise Exception("Invalid input. Please enter a valid index number or 'No'.")
 
-                # ==========================================================
-                # MENU: 1.Full Batch | 2.Today Class | 3.Khazana | 4.Select Date
-                # ==========================================================
+            # ==========================================================
+            # MENU: 1.Full Batch | 2.Today Class | 3.Khazana | 4.Select Date
+            # ==========================================================
+            await editable.edit(
+                "1.```\nFull Batch```\n"
+                "2.```\nToday's Class```\n"
+                "3.```\nKhazana```\n"
+                "4.```\n📅 Select Date (Send Timestamp)```"
+            )
+
+            try:
+                input6 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
+                raw_text6 = input6.text
+                await input6.delete(True)
+            except ListenerTimeout:
+                await editable.edit("**Timeout! You took too long to respond😢.**")
+                return
+            except Exception as e:
+                logging.exception("Error during option listening:")
+                try:
+                    await editable.edit(f"**Error: {e}**")
+                except:
+                    logging.error(f"Failed to send error message to user: {e}")
+                return
+
+            await editable.edit(f"**Extracting course : {selected_batch_name} ...**")
+            start_time = time.time()
+
+            # ==========================================================
+            # OPTION 1: FULL BATCH
+            # ==========================================================
+            if input6.text == '1':
+                url = f"https://api.penpencil.co/v3/batches/{selected_batch_id}/details"
+                batch_details = await fetch_pwwp_data(session, url, headers=headers)
+
+                if batch_details and batch_details.get("success"):
+                    subjects = batch_details.get("data", {}).get("subjects", [])
+
+                    json_data = {selected_batch_name: {}}
+                    all_subject_urls = {}
+
+                    with zipfile.ZipFile(f"{clean_file_name}.zip", 'w') as zipf:
+                        subject_tasks = [
+                            process_pwwp_subject(session, subject, selected_batch_id, selected_batch_name, zipf, json_data, all_subject_urls, headers)
+                            for subject in subjects
+                        ]
+                        await asyncio.gather(*subject_tasks)
+
+                    with open(f"{clean_file_name}.json", 'w') as f:
+                        json.dump(json_data, f, indent=4)
+
+                    with open(f"{clean_file_name}.txt", 'w', encoding='utf-8') as f:
+                        for subject in subjects:
+                            subject_name = safe_topic(subject.get("subject"), "Unknown Subject")
+                            if subject_name in all_subject_urls:
+                                f.write('\n'.join(all_subject_urls[subject_name]) + '\n')
+                else:
+                    raise Exception(f"Error fetching batch details: {batch_details.get('message')}")
+
+            # ==========================================================
+            # OPTION 2: TODAY'S CLASS (using working v1 endpoint)
+            # EXACTLY as in workingmain.py - DO NOT MODIFY
+            # ==========================================================
+            elif input6.text == '2':
+                selected_batch_name = "Today's Class"
+                today_schedule = await get_pwwp_all_todays_schedule_content(session, selected_batch_id, headers)
+                if today_schedule:
+                    clean_file_name = f"{user_id}_today_class"
+                    with open(f"{clean_file_name}.txt", "w", encoding="utf-8") as f:
+                        f.writelines(today_schedule)
+                else:
+                    raise Exception("No Classes Found Today")
+
+            # ==========================================================
+            # OPTION 3: KHAZANA
+            # ==========================================================
+            elif input6.text == '3':
+                raise Exception("Working In Progress")
+
+            # ==========================================================
+            # OPTION 4: SELECT DATE (TIMESTAMP INPUT)
+            # FIXED: Now uses IST timezone and user's timestamp as endDate
+            # ==========================================================
+            elif input6.text == '4':
                 await editable.edit(
-                    "1.```\nFull Batch```\n"
-                    "2.```\nToday's Class```\n"
-                    "3.```\nKhazana```\n"
-                    "4.```\n📅 Select Date (Send Timestamp)```"
+                    "**📅 Select Date\n\n"
+                    "Send Date Timestamp (in milliseconds):\n\n"
+                    "Example:\n"
+                    "```1781717400000```\n\n"
+                    "This will extract all classes from 12:00 AM IST of that date "
+                    "upto the time you specified.**"
                 )
 
                 try:
-                    input6 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
-                    raw_text6 = input6.text
-                    await input6.delete(True)
-                except ListenerTimeout:
+                    input7 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
+                    timestamp_input = input7.text.strip()
+                    await input7.delete(True)
+                except:
                     await editable.edit("**Timeout! You took too long to respond😢.**")
                     return
-                except Exception as e:
-                    logging.exception("Error during option listening:")
-                    try:
-                        await editable.edit(f"**Error: {e}**")
-                    except:
-                        logging.error(f"Failed to send error message to user: {e}")
+
+                # Parse timestamp to date range (IST based)
+                start_epoch, end_epoch, target_date, display_date = parse_user_timestamp_to_date_range(timestamp_input)
+
+                if start_epoch is None:
+                    await editable.edit(
+                        "**❌ Invalid Timestamp!\n\n"
+                        "Please send a valid numeric timestamp in milliseconds.\n"
+                        "Example: ```1781717400000```**"
+                    )
                     return
 
-                await editable.edit(f"**Extracting course : {selected_batch_name} ...**")
-                start_time = time.time()
+                await editable.edit(f"**📅 Fetching classes for {display_date} (timestamp: {timestamp_input})...**")
 
-                # ==========================================================
-                # OPTION 1: FULL BATCH
-                # ==========================================================
-                if input6.text == '1':
-                    url = f"https://api.penpencil.co/v3/batches/{selected_batch_id}/details"
-                    batch_details = await fetch_pwwp_data(session, url, headers=headers)
+                txt_path, zip_path, total_schedules, error = await process_date_content(
+                    session, selected_batch_id, selected_batch_name, start_epoch, end_epoch, target_date, headers, user_id
+                )
 
-                    if batch_details and batch_details.get("success"):
-                        subjects = batch_details.get("data", {}).get("subjects", [])
+                if error:
+                    await editable.edit(f"**⚠️ {error}**")
+                    return
 
-                        json_data = {selected_batch_name: {}}
-                        all_subject_urls = {}
+                if txt_path and os.path.exists(txt_path):
+                    clean_file_name = f"{user_id}_date_{display_date}"
+                    # Rename files
+                    for ext in ['txt', 'zip', 'json']:
+                        src = f"date_{target_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
+                        if ext == 'txt':
+                            src = txt_path
+                        elif ext == 'zip':
+                            src = zip_path
+                        if os.path.exists(src):
+                            dst = f"{clean_file_name}.{ext}"
+                            os.rename(src, dst)
 
-                        with zipfile.ZipFile(f"{clean_file_name}.zip", 'w') as zipf:
-                            subject_tasks = [
-                                process_pwwp_subject(session, subject, selected_batch_id, selected_batch_name, zipf, json_data, all_subject_urls, headers)
-                                for subject in subjects
-                            ]
-                            await asyncio.gather(*subject_tasks)
+                    end_time = time.time()
+                    response_time = end_time - start_time
+                    minutes = int(response_time // 60)
+                    seconds = int(response_time % 60)
+                    formatted_time = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-                        with open(f"{clean_file_name}.json", 'w') as f:
-                            json.dump(json_data, f, indent=4)
+                    await editable.delete(True)
 
-                        with open(f"{clean_file_name}.txt", 'w', encoding='utf-8') as f:
-                            for subject in subjects:
-                                subject_name = safe_topic(subject.get("subject"), "Unknown Subject")
-                                if subject_name in all_subject_urls:
-                                    f.write('\n'.join(all_subject_urls[subject_name]) + '\n')
-                    else:
-                        raise Exception(f"Error fetching batch details: {batch_details.get('message')}")
-
-                # ==========================================================
-                # OPTION 2: TODAY'S CLASS (using working v1 endpoint)
-                # EXACTLY as in workingmain.py - DO NOT MODIFY
-                # ==========================================================
-                elif input6.text == '2':
-                    selected_batch_name = "Today's Class"
-                    today_schedule = await get_pwwp_all_todays_schedule_content(session, selected_batch_id, headers)
-                    if today_schedule:
-                        clean_file_name = f"{user_id}_today_class"
-                        with open(f"{clean_file_name}.txt", "w", encoding="utf-8") as f:
-                            f.writelines(today_schedule)
-                    else:
-                        raise Exception("No Classes Found Today")
-
-                # ==========================================================
-                # OPTION 3: KHAZANA
-                # ==========================================================
-                elif input6.text == '3':
-                    raise Exception("Working In Progress")
-
-                # ==========================================================
-                # OPTION 4: SELECT DATE (TIMESTAMP INPUT)
-                # FIXED: Now uses IST timezone and user's timestamp as endDate
-                # ==========================================================
-                elif input6.text == '4':
-                    await editable.edit(
-                        "**📅 Select Date\n\n"
-                        "Send Date Timestamp (in milliseconds):\n\n"
-                        "Example:\n"
-                        "```1781717400000```\n\n"
-                        "This will extract all classes from 12:00 AM IST of that date "
-                        "upto the time you specified.**"
+                    caption = (
+                        f"**Batch Name : ```\n{selected_batch_name}```\n"
+                        f"📅 Date: {display_date}\n"
+                        f"📊 Total Classes: {total_schedules}\n"
+                        f"Time Taken : {formatted_time}```**"
                     )
 
-                    try:
-                        input7 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
-                        timestamp_input = input7.text.strip()
-                        await input7.delete(True)
-                    except:
-                        await editable.edit("**Timeout! You took too long to respond😢.**")
-                        return
-
-                    # Parse timestamp to date range (IST based)
-                    start_epoch, end_epoch, target_date, display_date = parse_user_timestamp_to_date_range(timestamp_input)
-
-                    if start_epoch is None:
-                        await editable.edit(
-                            "**❌ Invalid Timestamp!\n\n"
-                            "Please send a valid numeric timestamp in milliseconds.\n"
-                            "Example: ```1781717400000```**"
-                        )
-                        return
-
-                    await editable.edit(f"**📅 Fetching classes for {display_date} (timestamp: {timestamp_input})...**")
-
-                    txt_path, zip_path, total_schedules, error = await process_date_content(
-                        session, selected_batch_id, selected_batch_name, start_epoch, end_epoch, target_date, headers, user_id
-                    )
-
-                    if error:
-                        await editable.edit(f"**⚠️ {error}**")
-                        return
-
-                    if txt_path and os.path.exists(txt_path):
-                        clean_file_name = f"{user_id}_date_{display_date}"
-                        # Rename files
-                        for ext in ['txt', 'zip', 'json']:
-                            src = f"date_{target_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
-                            if ext == 'txt':
-                                src = txt_path
-                            elif ext == 'zip':
-                                src = zip_path
-                            if os.path.exists(src):
-                                dst = f"{clean_file_name}.{ext}"
-                                os.rename(src, dst)
-
-                        end_time = time.time()
-                        response_time = end_time - start_time
-                        minutes = int(response_time // 60)
-                        seconds = int(response_time % 60)
-                        formatted_time = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-
-                        await editable.delete(True)
-
-                        caption = (
-                            f"**Batch Name : ```\n{selected_batch_name}```\n"
-                            f"📅 Date: {display_date}\n"
-                            f"📊 Total Classes: {total_schedules}\n"
-                            f"Time Taken : {formatted_time}```**"
-                        )
-
-                        # Send files
-                        for ext in ['txt', 'zip', 'json']:
-                            fp = f"{clean_file_name}.{ext}"
-                            if os.path.exists(fp):
-                                with open(fp, 'rb') as f:
-                                    await m.reply_document(
-                                        document=f,
-                                        caption=caption if ext == 'txt' else f"{selected_batch_name} - {ext.upper()}",
-                                        file_name=f"{selected_batch_name.replace('/', '-').replace('|', '-')}_{display_date}.{ext}"
-                                    )
-                                os.remove(fp)
-                        return  # Already sent files
-                    else:
-                        await editable.edit(f"**⚠️ No content found for {display_date}**")
-                        return
-
+                    # Send files
+                    for ext in ['txt', 'zip', 'json']:
+                        fp = f"{clean_file_name}.{ext}"
+                        if os.path.exists(fp):
+                            with open(fp, 'rb') as f:
+                                await m.reply_document(
+                                    document=f,
+                                    caption=caption if ext == 'txt' else f"{selected_batch_name} - {ext.upper()}",
+                                    file_name=f"{selected_batch_name.replace('/', '-').replace('|', '-')}_{display_date}.{ext}"
+                                )
+                            os.remove(fp)
+                    return  # Already sent files
                 else:
-                    raise Exception("Invalid index.")
+                    await editable.edit(f"**⚠️ No content found for {display_date}**")
+                    return
 
-                # ==========================================================
-                # Send output files (for options 1, 2)
-                # ==========================================================
-                end_time = time.time()
-                response_time = end_time - start_time
-                minutes = int(response_time // 60)
-                seconds = int(response_time % 60)
-
-                if minutes == 0:
-                    if seconds < 1:
-                        formatted_time = f"{response_time:.2f} seconds"
-                    else:
-                        formatted_time = f"{seconds} seconds"
-                else:
-                    formatted_time = f"{minutes} minutes {seconds} seconds"
-
-                await editable.delete(True)
-
-                caption = f"**Batch Name : ```\n{selected_batch_name}``````\nTime Taken : {formatted_time}```**"
-
-                files = [f"{clean_file_name}.{ext}" for ext in ["txt", "zip", "json"]]
-                for file in files:
-                    file_ext = os.path.splitext(file)[1][1:]
-                    try:
-                        with open(file, 'rb') as f:
-                            doc = await m.reply_document(document=f, caption=caption, file_name=f"{clean_batch_name}.{file_ext}")
-                    except FileNotFoundError:
-                        logging.error(f"File not found: {file}")
-                    except Exception as e:
-                        logging.exception(f"Error sending document {file}:")
-                    finally:
-                        try:
-                            os.remove(file)
-                            logging.info(f"Removed File After Sending : {file}")
-                        except OSError as e:
-                            logging.error(f"Error deleting {file}: {e}")
             else:
-                raise Exception("No batches found for the given search name.")
+                raise Exception("Invalid index.")
+
+            # ==========================================================
+            # Send output files (for options 1, 2)
+            # ==========================================================
+            end_time = time.time()
+            response_time = end_time - start_time
+            minutes = int(response_time // 60)
+            seconds = int(response_time % 60)
+
+            if minutes == 0:
+                if seconds < 1:
+                    formatted_time = f"{response_time:.2f} seconds"
+                else:
+                    formatted_time = f"{seconds} seconds"
+            else:
+                formatted_time = f"{minutes} minutes {seconds} seconds"
+
+            await editable.delete(True)
+
+            caption = f"**Batch Name : ```\n{selected_batch_name}``````\nTime Taken : {formatted_time}```**"
+
+            files = [f"{clean_file_name}.{ext}" for ext in ["txt", "zip", "json"]]
+            for file in files:
+                file_ext = os.path.splitext(file)[1][1:]
+                try:
+                    with open(file, 'rb') as f:
+                        doc = await m.reply_document(document=f, caption=caption, file_name=f"{clean_batch_name}.{file_ext}")
+                except FileNotFoundError:
+                    logging.error(f"File not found: {file}")
+                except Exception as e:
+                    logging.exception(f"Error sending document {file}:")
+                finally:
+                    try:
+                        os.remove(file)
+                        logging.info(f"Removed File After Sending : {file}")
+                    except OSError as e:
+                        logging.error(f"Error deleting {file}: {e}")
 
         except Exception as e:
             logging.exception(f"An unexpected error occurred: {e}")
