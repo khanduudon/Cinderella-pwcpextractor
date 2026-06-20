@@ -400,7 +400,15 @@ def append_video_params(video_url: str, parent_id: str = "", child_id: str = "",
     if not params:
         return video_url
 
-    separator = '&' if '?' in video_url else '?'
+    # Fix: if URL already has '?' before our params, use '&'; else use '?'
+    # But if the existing '?' is part of a signed URL before .mpd, we must still use '?'
+    # So we check if there's a '?' AFTER the last '.mpd' occurrence
+    mpd_pos = video_url.lower().rfind('.mpd')
+    if mpd_pos != -1:
+        after_mpd = video_url[mpd_pos:]
+        separator = '&' if '?' in after_mpd else '?'
+    else:
+        separator = '&' if '?' in video_url else '?'
     param_string = separator + '&'.join(params)
     return video_url + param_string
 
