@@ -17,7 +17,7 @@ if OWNER not in AUTH_USERS:
 
 # ── Logging Channel ────────────────────────────────────────────────────────
 # Format: -100123456789 (negative group chat ID)
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1004370124638"))
+LOG_CHANNEL = (os.environ.get("LOG_CHANNEL", "-1004370124638"))
 
 # ── Video Player Configuration ─────────────────────────────────────────────
 HEROKU_VIDEO_URL = os.environ.get(
