@@ -1,5 +1,5 @@
 import requests
-import Pillow
+from PIL import Image
 import asyncio
 import aiohttp
 import json
