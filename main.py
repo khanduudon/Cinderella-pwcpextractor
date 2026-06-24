@@ -3648,7 +3648,7 @@ async def process_pwwp(bot, m, user_id):
                     "`16/06/2026`\n\n"
                     "Multiple Dates Format (max 10):\n"
                     "`15/06/2026&16/06/2026&21/09/2025`\n\n"
-                    "Connect dates with `&` — no spaces needed.\n\n"
+                    "Connect dates with `&` koi space mat dena bich me.\n\n"
                     "This will extract all classes scheduled on those dates (IST), videos & PDFs both.**"
                 )
 
@@ -3769,7 +3769,7 @@ async def process_pwwp(bot, m, user_id):
                             f"📅 Date: {disp_date}\n"
                             f"📊 Total Classes: {total_schedules}\n"
                             f"Time Taken : {fmt_time_multi}```"
-                            f"Extracted By: @JapaneseFury**"
+                            f"Extracted By:@JapaneseFury**"
                         )
 
                         # Send only txt file for multi-date mode (no html)
@@ -3794,7 +3794,7 @@ async def process_pwwp(bot, m, user_id):
                                     pass
 
                             done_msg = await m.reply_text(
-                                f"**DONE ✅ {index_label} | {disp_date} Extracted!**"
+                                f"**DONE ✅ {index_label} | {disp_date} Done Boss!**"
                             )
                             all_sent_message_ids.append(done_msg.id)
 
@@ -3855,7 +3855,7 @@ async def process_pwwp(bot, m, user_id):
                             f"📅 Date: {disp_date}\n"
                             f"📊 Total Classes: {total_schedules}\n"
                             f"Time Taken : {formatted_time}```"
-                            f"Extracted By: @JapaneseFury**"
+                            f"Extracted By:@JapaneseFury**"
                         )
 
                         # Send files for single date: txt + html (original behaviour)
