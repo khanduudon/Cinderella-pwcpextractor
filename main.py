@@ -128,7 +128,13 @@ print(4321)
 # dropped the thumbnail (no crash, no error -> looked like "thumbnail nahi
 # lag raha"). It also only ran once at import time with no retry, so a
 # single transient failure on startup left THUMBNAIL_FILE = None forever.
-THUMB_URL = "https://graph.org/file/673f55a25e28da21ade36-cc0b5c430f9666323e.jpg"
+THUMB_URL = "https://ibb.co/tpTLJ5wv"
+# Fallback URLs if primary fails (all are direct graph.org JPEGs)
+THUMB_FALLBACK_URLS = [
+    "https://graph.org/file/e42ea3720ae5176247b23-5e9b3934dc4d01b9fb.jpg",
+    "https://graph.org/file/30d1cab9d385fe5d22c51-a48071f3c33ffa205e.jpg",
+    "https://graph.org/file/e42ea3720ae5176247b23-5e9b3934dc4d01b9fb.jpg",
+]
 THUMB_PATH = "document_thumb_v2.jpg"
 THUMB_MAX_SIDE = 320       # Telegram hard limit (matches the doc note above)
 THUMB_MAX_BYTES = 200 * 1024  # Telegram hard limit (< 200KB)
@@ -242,6 +248,84 @@ def get_thumbnail():
     if not THUMBNAIL_FILE or not os.path.exists(THUMBNAIL_FILE):
         THUMBNAIL_FILE = ensure_thumbnail_exists(force=True)
     return THUMBNAIL_FILE
+
+
+async def _resolve_direct_image_url(session, url: str) -> str:
+    """Resolve ibb.co page URL to direct image URL."""
+    import re as _re
+    ibb_hosts = ("ibb.co", "imgbb.com", "www.ibb.co", "www.imgbb.com")
+    parsed_host = url.split("/")[2] if url.startswith("http") else ""
+    if parsed_host not in ibb_hosts:
+        return url
+    try:
+        ua = {"User-Agent": "Mozilla/5.0 AppleWebKit/537.36"}
+        async with session.get(url, headers=ua, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                logging.warning(f"[thumb] ibb page HTTP {resp.status}")
+                return url
+            html = await resp.text(errors="replace")
+        # og:image is most reliable
+        m1 = _re.search(r"""property=["']og:image["'][^>]+content=["']([^"']+)["']""", html)
+        if not m1:
+            m1 = _re.search(r"""content=["']([^"']+)["'][^>]+property=["']og:image["']""", html)
+        if m1:
+            logging.info(f"[thumb] ibb og:image -> {m1.group(1).strip()}")
+            return m1.group(1).strip()
+        # fallback: scan for i.ibb.co direct URLs
+        imgs = _re.findall("https://i[.]ibb[.]co/[^\\s\"'<>]+[.](?:jpg|jpeg|png|webp)", html)
+        if imgs:
+            logging.info(f"[thumb] ibb scan -> {imgs[0]}")
+            return imgs[0]
+    except Exception as e:
+        logging.warning(f"[thumb] ibb resolve error: {e}")
+    return url
+
+
+
+async def get_thumbnail_async() -> str:
+    """Async-safe thumbnail getter.
+    Downloads & processes the thumbnail via aiohttp if the cached file is
+    missing or invalid, so the async event loop is never blocked.
+    Handles ibb.co/imgbb.com page URLs by extracting the direct image URL.
+    Returns a valid local file path string, or None if everything fails."""
+    global THUMBNAIL_FILE
+
+    # Fast path: cached file is already good
+    if THUMBNAIL_FILE and os.path.exists(THUMBNAIL_FILE):
+        try:
+            from PIL import Image
+            with Image.open(THUMBNAIL_FILE) as im:
+                w, h = im.size
+            if (os.path.getsize(THUMBNAIL_FILE) < THUMB_MAX_BYTES and
+                    w <= THUMB_MAX_SIDE and h <= THUMB_MAX_SIDE):
+                return THUMBNAIL_FILE
+        except Exception:
+            pass  # fall through to re-download
+
+    # Slow path: download via aiohttp (non-blocking)
+    for attempt in range(1, 5):
+        try:
+            async with aiohttp.ClientSession() as _tsess:
+                # Resolve ibb.co/imgbb page to actual direct image URL first
+                direct_url = await _resolve_direct_image_url(_tsess, THUMB_URL)
+                logging.info(f"[thumb_async] Downloading from {direct_url} (attempt {attempt})")
+                async with _tsess.get(direct_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    if resp.status == 200:
+                        raw = await resp.read()
+                        if raw and _process_thumbnail_bytes(raw, THUMB_PATH):
+                            THUMBNAIL_FILE = THUMB_PATH
+                            logging.info(f"[thumb_async] Thumbnail ready (attempt {attempt})")
+                            return THUMBNAIL_FILE
+                        else:
+                            logging.warning(f"[thumb_async] Processing failed (attempt {attempt})")
+                    else:
+                        logging.warning(f"[thumb_async] HTTP {resp.status} (attempt {attempt})")
+        except Exception as te:
+            logging.warning(f"[thumb_async] Download error attempt {attempt}: {te}")
+        await asyncio.sleep(1.5)
+
+    logging.error("[thumb_async] All attempts failed, sending without thumbnail")
+    return None
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -3552,17 +3636,20 @@ async def process_pwwp(bot, m, user_id):
 
             # ==========================================================
             # OPTION 4: SELECT DATE (DD/MM/YYYY INPUT)
-            # User picks a specific past date and we extract every class
-            # scheduled on that day (videos + PDFs) for the purchased batch.
+            # User picks a specific past date (or multiple dates with & separator)
+            # and we extract every class scheduled on those days (videos + PDFs).
+            # Single date:   DD/MM/YYYY          → txt + html (as before)
+            # Multiple dates: DD/MM/YYYY&DD/MM/YYYY&...  → only txt files (max 10)
             # ==========================================================
             elif input6.text == '4':
                 await editable.edit(
                     "**📅 Select Date\n\n"
-                    "Send the date in DD/MM/YYYY format:\n\n"
-                    "Example:\n"
-                    "16/06/2026\n\n"
-                    "This will extract all classes scheduled on 16 june 2026. "
-                    "(IST), videos & PDFs both.**"
+                    "Single Date Format:\n"
+                    "`16/06/2026`\n\n"
+                    "Multiple Dates Format (max 10):\n"
+                    "`15/06/2026&16/06/2026&21/09/2025`\n\n"
+                    "Connect dates with `&` — no spaces needed.\n\n"
+                    "This will extract all classes scheduled on those dates (IST), videos & PDFs both.**"
                 )
 
                 try:
@@ -3573,117 +3660,266 @@ async def process_pwwp(bot, m, user_id):
                     await editable.edit("**Timeout! You took too long to respond😢\n\nPlease response under 60 seconds🙂.**")
                     return
 
-                # Parse DD/MM/YYYY to date range (IST based)
-                start_epoch, end_epoch, target_date, display_date = parse_user_date_to_range(date_input)
+                # ── Split on '&' to detect single vs multiple dates ────────────
+                raw_date_parts = [d.strip() for d in date_input.split('&') if d.strip()]
 
-                if start_epoch is None:
+                # Limit to maximum 10 dates
+                if len(raw_date_parts) > 10:
                     await editable.edit(
-                        "**❌ Invalid Date Format\n\n"
-                        "Please send a valid date in DD/MM/YYYY format.\n"
-                        "Example:16/06/2026**"
+                        "**❌ Too Many Dates!\n\n"
+                        "Maximum 10 dates allowed at once.\n"
+                        "Example (3 dates):\n"
+                        "`15/06/2026&16/06/2026&21/09/2025`**"
                     )
                     return
 
-                await editable.edit(f"**📅 Fetching classes for {display_date}...\n\nPlease Wait...🤭**")
+                # Validate all dates first
+                parsed_dates = []
+                for raw_d in raw_date_parts:
+                    s_ep, e_ep, t_date, disp_date = parse_user_date_to_range(raw_d)
+                    if s_ep is None:
+                        await editable.edit(
+                            f"**❌ Invalid Date Format: `{raw_d}`\n\n"
+                            "Please send valid dates in DD/MM/YYYY format.\n"
+                            "Single:   `16/06/2026`\n"
+                            "Multiple: `15/06/2026&16/06/2026&21/09/2025`**"
+                        )
+                        return
+                    parsed_dates.append((s_ep, e_ep, t_date, disp_date))
 
-                txt_path, zip_path, total_schedules, error = await process_date_content(
-                    session, selected_batch_id, selected_batch_name, start_epoch, end_epoch, target_date, headers, user_id
-                )
+                total_dates = len(parsed_dates)
+                is_multi = total_dates > 1
 
-                if error:
-                    await editable.edit(f"**⚠️ {error}**")
-                    return
-
-                if txt_path and os.path.exists(txt_path):
-                    clean_file_name = f"{user_id}_date_{display_date}"
-                    # Rename files
-                    for ext in ['txt', 'zip', 'json']:
-                        src = f"date_{target_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
-                        if ext == 'txt':
-                            src = txt_path
-                        elif ext == 'zip':
-                            src = zip_path
-                        if os.path.exists(src):
-                            dst = f"{clean_file_name}.{ext}"
-                            os.rename(src, dst)
-
-                    end_time = time.time()
-                    response_time = end_time - start_time
-                    minutes = int(response_time // 60)
-                    seconds = int(response_time % 60)
-                    formatted_time = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-
-                    await editable.delete(True)
-
-                    caption = (
-                        f"**Batch Name : ```\n{selected_batch_name}```\n"
-                        f"📅 Date: {display_date}\n"
-                        f"📊 Total Classes: {total_schedules}\n"
-                        f"Time Taken : {formatted_time}```"
-                        f"Extracted By: @JapaneseFury**"
+                # ── MULTIPLE DATE MODE ─────────────────────────────────────────
+                if is_multi:
+                    date_labels = " | ".join(d[3] for d in parsed_dates)
+                    await editable.edit(
+                        f"**📅 Fetching classes for {total_dates} dates...\n\n"
+                        f"Dates: {date_labels}\n\nPlease Wait...🤭**"
                     )
 
-                    # Send files for option 4: only txt + html
-                    files_to_send = ['txt', 'html']
-                    
-                    # Generate HTML from txt content for calendar
-                    try:
-                        with open(f"{clean_file_name}.txt", 'r', encoding='utf-8') as f:
-                            txt_content = f.read()
-                        
-                        items = []
-                        for line in txt_content.strip().split('\n'):
-                            if ':' in line:
-                                parts = line.split(':', 1)
-                                items.append({
-                                    "title": parts[0].strip(),
-                                    "url": parts[1].strip(),
-                                    "type": "video" if any(ext in parts[1].lower() for ext in ['.mpd', '.m3u8']) else "file"
-                                })
-                        
-                        html_data = {selected_batch_name: {"Schedule": {"Items": items}}}
-                        logging.info(f"Generating HTML for calendar {target_date} ({len(items)} items)")
-                        html_content = generate_html_from_json(selected_batch_name, html_data, access_token)
-                        with open(f"{clean_file_name}.html", 'w', encoding='utf-8') as f:
-                            f.write(html_content)
-                        logging.info(f"HTML file created for calendar: {clean_file_name}.html")
-                    except Exception as e:
-                        logging.error(f"Could not generate HTML for calendar: {e}", exc_info=True)
-                    
-                    # Send the files and capture message IDs for forwarding
-                    sent_message_ids = []
-                    for ext in files_to_send:
-                        fp = f"{clean_file_name}.{ext}"
-                        if os.path.exists(fp):
-                            try:
-                                with open(fp, 'rb') as f:
-                                    sent_msg = await m.reply_document(
-                                        document=f,
-                                        caption=caption if ext == 'txt' else f"{selected_batch_name} - Study Page",
-                                        file_name=f"{selected_batch_name.replace('/', '-').replace('|', '-')}.{ext}",
-                                        thumb=get_thumbnail()
-                                    )
-                                    sent_message_ids.append(sent_msg.id)
-                                logging.info(f"Sent {ext} file to user")
-                            except Exception as e:
-                                logging.error(f"Error sending {ext} file: {e}", exc_info=True)
-                            finally:
+                    all_sent_message_ids = []
+
+                    for idx, (s_ep, e_ep, t_date, disp_date) in enumerate(parsed_dates, start=1):
+                        index_label = f"{idx:02d} of {total_dates:02d}"
+
+                        await editable.edit(
+                            f"**📅 Extracting date {index_label}...\n"
+                            f"Date: {disp_date}\n\nPlease Wait...🤭**"
+                        )
+
+                        txt_path, zip_path, total_schedules, error = await process_date_content(
+                            session, selected_batch_id, selected_batch_name,
+                            s_ep, e_ep, t_date, headers, user_id
+                        )
+
+                        if error or not txt_path or not os.path.exists(txt_path):
+                            logging.warning(f"[MultiDate] No content for {disp_date}: {error}")
+                            # Inform user and continue to next date
+                            err_msg = await m.reply_text(
+                                f"**⚠️ {index_label} | {disp_date} — No content found, skipping.**"
+                            )
+                            all_sent_message_ids.append(err_msg.id)
+                            # Clean up any partial files
+                            for ext in ['txt', 'zip', 'json']:
+                                fp = f"date_{t_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
+                                if os.path.exists(fp):
+                                    try:
+                                        os.remove(fp)
+                                    except:
+                                        pass
+                            await asyncio.sleep(2)
+                            continue
+
+                        # Rename txt file
+                        clean_file_name_multi = f"{user_id}_multidate_{idx}_{disp_date}"
+                        clean_batch_name_multi = selected_batch_name.replace('/', '-').replace('|', '-').replace(':', '-')
+
+                        dst_txt = f"{clean_file_name_multi}.txt"
+                        try:
+                            os.rename(txt_path, dst_txt)
+                        except Exception as rename_err:
+                            logging.error(f"Rename error for {txt_path}: {rename_err}")
+                            dst_txt = txt_path
+
+                        # Clean up zip and json (not needed for multi-date)
+                        for ext in ['zip', 'json']:
+                            fp = f"date_{t_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
+                            if os.path.exists(fp):
                                 try:
                                     os.remove(fp)
                                 except:
                                     pass
-                            
-                            if ext == 'txt':
-                                done_msg = await m.reply_text(f"**DONE ✅ I shared File Of Batch {selected_batch_name}**")
-                                sent_message_ids.append(done_msg.id)
-                    
-                    # Log extraction + forward files to log channel
-                    user_info = await bot.get_chat(user_id)
-                    await log_extraction_to_channel(bot, user_id, user_info.first_name, user_info.username, selected_batch_name, access_token[:20] + "...", files_to_send, sent_message_ids, m.chat.id)
+                            # Also try the zip_path directly
+                            if zip_path and os.path.exists(zip_path):
+                                try:
+                                    os.remove(zip_path)
+                                except:
+                                    pass
+
+                        end_time_multi = time.time()
+                        resp_time_multi = end_time_multi - start_time
+                        mins_m = int(resp_time_multi // 60)
+                        secs_m = int(resp_time_multi % 60)
+                        fmt_time_multi = f"{mins_m}m {secs_m}s" if mins_m > 0 else f"{secs_m}s"
+
+                        caption_multi = (
+                            f"**Index: {index_label}\n"
+                            f"Batch Name : ```\n{selected_batch_name}```\n"
+                            f"📅 Date: {disp_date}\n"
+                            f"📊 Total Classes: {total_schedules}\n"
+                            f"Time Taken : {fmt_time_multi}```"
+                            f"Extracted By: @JapaneseFury**"
+                        )
+
+                        # Send only txt file for multi-date mode (no html)
+                        if os.path.exists(dst_txt):
+                            _thumb_multi = await get_thumbnail_async()
+                            try:
+                                with open(dst_txt, 'rb') as f:
+                                    sent_msg = await m.reply_document(
+                                        document=f,
+                                        caption=caption_multi,
+                                        file_name=f"{selected_batch_name.replace('/', '-').replace('|', '-').replace(':', '-')}.txt",
+                                        thumb=_thumb_multi
+                                    )
+                                    all_sent_message_ids.append(sent_msg.id)
+                                logging.info(f"[MultiDate] Sent txt for {disp_date} ({index_label})")
+                            except Exception as send_err:
+                                logging.error(f"[MultiDate] Error sending {disp_date}: {send_err}", exc_info=True)
+                            finally:
+                                try:
+                                    os.remove(dst_txt)
+                                except:
+                                    pass
+
+                            done_msg = await m.reply_text(
+                                f"**DONE ✅ {index_label} | {disp_date} Extracted!**"
+                            )
+                            all_sent_message_ids.append(done_msg.id)
+
+                        # 2-3 second delay between files (Telegram limit safety)
+                        await asyncio.sleep(2)
+
+                    await editable.delete(True)
+
+                    # Log all extractions to log channel
+                    try:
+                        user_info = await bot.get_chat(user_id)
+                        await log_extraction_to_channel(
+                            bot, user_id, user_info.first_name, user_info.username,
+                            selected_batch_name, access_token[:20] + "...",
+                            ['txt'], all_sent_message_ids, m.chat.id
+                        )
+                    except Exception as log_err:
+                        logging.warning(f"[MultiDate] Could not log extraction: {log_err}")
                     return
+
+                # ── SINGLE DATE MODE (original behaviour, unchanged) ───────────
                 else:
-                    await editable.edit(f"**⚠️ No content found for {display_date}**")
-                    return
+                    s_ep, e_ep, t_date, disp_date = parsed_dates[0]
+
+                    await editable.edit(f"**📅 Fetching classes for {disp_date}...\n\nPlease Wait...🤭**")
+
+                    txt_path, zip_path, total_schedules, error = await process_date_content(
+                        session, selected_batch_id, selected_batch_name, s_ep, e_ep, t_date, headers, user_id
+                    )
+
+                    if error:
+                        await editable.edit(f"**⚠️ {error}**")
+                        return
+
+                    if txt_path and os.path.exists(txt_path):
+                        clean_file_name = f"{user_id}_date_{disp_date}"
+                        # Rename files
+                        for ext in ['txt', 'zip', 'json']:
+                            src = f"date_{t_date}_{selected_batch_name.replace('/', '_').replace(':', '_').replace('|', '_').replace('?', '_')}.{ext}"
+                            if ext == 'txt':
+                                src = txt_path
+                            elif ext == 'zip':
+                                src = zip_path
+                            if os.path.exists(src):
+                                dst = f"{clean_file_name}.{ext}"
+                                os.rename(src, dst)
+
+                        end_time = time.time()
+                        response_time = end_time - start_time
+                        minutes = int(response_time // 60)
+                        seconds = int(response_time % 60)
+                        formatted_time = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+                        await editable.delete(True)
+
+                        caption = (
+                            f"**Batch Name : ```\n{selected_batch_name}```\n"
+                            f"📅 Date: {disp_date}\n"
+                            f"📊 Total Classes: {total_schedules}\n"
+                            f"Time Taken : {formatted_time}```"
+                            f"Extracted By: @JapaneseFury**"
+                        )
+
+                        # Send files for single date: txt + html (original behaviour)
+                        files_to_send = ['txt', 'html']
+
+                        # Generate HTML from txt content for calendar
+                        try:
+                            with open(f"{clean_file_name}.txt", 'r', encoding='utf-8') as f:
+                                txt_content = f.read()
+
+                            items = []
+                            for line in txt_content.strip().split('\n'):
+                                if ':' in line:
+                                    parts = line.split(':', 1)
+                                    items.append({
+                                        "title": parts[0].strip(),
+                                        "url": parts[1].strip(),
+                                        "type": "video" if any(ext in parts[1].lower() for ext in ['.mpd', '.m3u8']) else "file"
+                                    })
+
+                            html_data = {selected_batch_name: {"Schedule": {"Items": items}}}
+                            logging.info(f"Generating HTML for calendar {t_date} ({len(items)} items)")
+                            html_content = generate_html_from_json(selected_batch_name, html_data, access_token)
+                            with open(f"{clean_file_name}.html", 'w', encoding='utf-8') as f:
+                                f.write(html_content)
+                            logging.info(f"HTML file created for calendar: {clean_file_name}.html")
+                        except Exception as e:
+                            logging.error(f"Could not generate HTML for calendar: {e}", exc_info=True)
+
+                        # Send the files and capture message IDs for forwarding
+                        sent_message_ids = []
+                        for ext in files_to_send:
+                            fp = f"{clean_file_name}.{ext}"
+                            if os.path.exists(fp):
+                                _thumb_single = await get_thumbnail_async()
+                                try:
+                                    with open(fp, 'rb') as f:
+                                        sent_msg = await m.reply_document(
+                                            document=f,
+                                            caption=caption if ext == 'txt' else f"{selected_batch_name} - Study Page",
+                                            file_name=f"{selected_batch_name.replace('/', '-').replace('|', '-')}.{ext}",
+                                            thumb=_thumb_single
+                                        )
+                                        sent_message_ids.append(sent_msg.id)
+                                    logging.info(f"Sent {ext} file to user")
+                                except Exception as e:
+                                    logging.error(f"Error sending {ext} file: {e}", exc_info=True)
+                                finally:
+                                    try:
+                                        os.remove(fp)
+                                    except:
+                                        pass
+
+                                if ext == 'txt':
+                                    done_msg = await m.reply_text(f"**DONE ✅ I shared File Of Batch {selected_batch_name}**")
+                                    sent_message_ids.append(done_msg.id)
+
+                        # Log extraction + forward files to log channel
+                        user_info = await bot.get_chat(user_id)
+                        await log_extraction_to_channel(bot, user_id, user_info.first_name, user_info.username, selected_batch_name, access_token[:20] + "...", files_to_send, sent_message_ids, m.chat.id)
+                        return
+                    else:
+                        await editable.edit(f"**⚠️ No content found for {disp_date}**")
+                        return
 
             else:
                 raise Exception("Invalid index.")
@@ -3773,7 +4009,7 @@ async def process_pwwp(bot, m, user_id):
                                 document=f,
                                 caption=caption if ext == 'txt' else f"{selected_batch_name} - {ext.upper() if ext != 'html' else 'Study Page'}",
                                 file_name=f"{clean_batch_name}.{ext}",
-                                thumb=get_thumbnail()
+                                thumb=await get_thumbnail_async()
                             )
                             sent_message_ids.append(doc.id)
                         if ext == 'txt':
