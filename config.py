@@ -1,7 +1,7 @@
 import os
 
 API_ID = 38498066
-API_HASH = c9696114751feacdeb1b4487f5839a1a"
+API_HASH = "c9696114751feacdeb1b4487f5839a1a"
 BOT_TOKEN =  "8874847847:AAHx7iDZxD_i8zehAUKzLWm0w42dYdBviYM"
 THUMB_URL = "https://ibb.co/tpTLJ5wv"
 THUMB_PATH = "document_thumb_v2.jpg"
