@@ -45,7 +45,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Bot credentials from environment variables (Render compatible)
 API_ID = int(os.environ.get("API_ID", 38498066))
 API_HASH = os.environ.get("API_HASH", "c9696114751feacdeb1b4487f5839a1a")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8874847847:AAHx7iDZxD_i8zehAUKzLWm0w42dYdBviYM")
 
 # Initialize Bot Globally
 bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -105,16 +105,7 @@ def run_flask():
     app_flask.run(host="0.0.0.0", port=8000)
 
 image_list = [
-    "https://graph.org/file/28339f6c961ca96a84f47-1a070fdc1632724513.jpg",
-    "https://graph.org/file/9db3816e75336ecc45959-6d49ddd4d0e92f1aae.jpg",
-    "https://graph.org/file/1d1548631e6d1d3b3796e-b6647f0434c20f100a.jpg",
-    "https://graph.org/file/a1c4b27984bb61183048c-d11e4d6c9ea09fcedb.jpg",
-    "https://graph.org/file/1d1dab8f4dc33df10e38c-a3c92d386be28422ac.jpg",
-    "https://graph.org/file/7831481e4c899748ee8a1-b976b5e72df8c3618c.jpg",
-    "https://graph.org/file/41b150f2461004c4fd99a-d29d2bc307f0fe6491.jpg",
-    "https://graph.org/file/ce8ebdb5c2ba8932ec780-1737059c6bb976617d.jpg",
-    "https://graph.org/file/1f2bd4b7d0747a432e3fe-b1229343f6557ba344.jpg",
-    "https://graph.org/file/b07088988e66447aeb92f-f8c4f26ad5b867aa5a.jpg",
+    "https://i.ibb.co/WvJFCD0c/IMG-20260228-062301-614.jpg",
 ]
 print(4321)
 
@@ -128,12 +119,10 @@ print(4321)
 # dropped the thumbnail (no crash, no error -> looked like "thumbnail nahi
 # lag raha"). It also only ran once at import time with no retry, so a
 # single transient failure on startup left THUMBNAIL_FILE = None forever.
-THUMB_URL = "https://ibb.co/tpTLJ5wv"
+THUMB_URL = "https://i.ibb.co/WvJFCD0c/IMG-20260228-062301-614.jpg"
 # Fallback URLs if primary fails (all are direct graph.org JPEGs)
 THUMB_FALLBACK_URLS = [
-    "https://graph.org/file/e42ea3720ae5176247b23-5e9b3934dc4d01b9fb.jpg",
-    "https://graph.org/file/30d1cab9d385fe5d22c51-a48071f3c33ffa205e.jpg",
-    "https://graph.org/file/e42ea3720ae5176247b23-5e9b3934dc4d01b9fb.jpg",
+    "https://i.ibb.co/WvJFCD0c/IMG-20260228-062301-614.jpg",
 ]
 THUMB_PATH = "document_thumb_v2.jpg"
 THUMB_MAX_SIDE = 320       # Telegram hard limit (matches the doc note above)
